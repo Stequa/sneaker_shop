@@ -1,0 +1,23 @@
+ 
+# IDE
+.vscode/
+.idea/
+
+# Go
+backend/bin/
+backend/*.exe
+backend/debug/
+
+# Node.js / React
+frontend/node_modules/
+frontend/build/
+frontend/.env
+frontend/.env.local
+
+# Логи и ОС
+*.log
+.DS_Store
+Thumbs.db
+
+# БД (если есть локальные файлы)
+*.sql
