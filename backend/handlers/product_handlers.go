@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetProducts возвращает список всех кроссовок (Gin-хэндлер)
+// GetProducts возвращает список всех кроссовок (Gin-хэндлер) GET запрос
 func GetProducts(c *gin.Context) {
 	rows, err := db.DB.Query(`
 		SELECT id, name, description, brand, price, COALESCE(image_url, ''), category_id, created_at
@@ -24,7 +24,7 @@ func GetProducts(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	var products []models.Product
+	var products []models.Product //Список продуктов для отображения
 	for rows.Next() {
 		var p models.Product
 		var createdAt string
@@ -40,8 +40,10 @@ func GetProducts(c *gin.Context) {
 
 	c.JSON(200, products)
 }
+
+// Функция для обработки POST запроса по созданию заказа
 func CreateOrder(c *gin.Context) {
-	var req struct { //Эта структура для ввода данных из JSON
+	var req struct { //Эта структура для получения данных из JSON
 		UserId          int                `json:"user_id"`
 		Status          string             `json:"status"`
 		ShippingAddress string             `json:"shipping_address"`
@@ -76,24 +78,20 @@ func CreateOrder(c *gin.Context) {
 		req.Items[i].PricePerUnit = price
 		total += price * float64(req.Items[i].Quantity) //Сумма заказа
 	}
+	//Запрос на вставку заказа
+	orderQuery := "INSERT INTO orders (user_id, total_amount, status, shipping_address, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at"
 
-	orderQuery := ` //Запрос на вставку заказа
-		INSERT INTO orders (user_id, total_amount, status, shipping_address, phone)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, created_at
-	`
-
-	var createdAt string                                                                          //Время создания заказа
-	err = tx.QueryRow(orderQuery, req.UserId, total, req.Status, req.ShippingAddress, req.Phone). //Запрос на вставку заказа
-													Scan(&req.Items[0].OrderId, &createdAt)
-	if err != nil { //Ошибка вставки заказа
+	var createdAt string                                                                                                                 //Время создания заказа
+	err = tx.QueryRow(orderQuery, req.UserId, total, req.Status, req.ShippingAddress, req.Phone).Scan(&req.Items[0].OrderId, &createdAt) //Запрос на вставку заказа
+	//Ошибка вставки заказа
+	if err != nil {
 		log.Printf(" Ошибка вставки заказа: %v", err)
 		c.JSON(500, gin.H{"error": "Не удалось создать заказ"})
 		return
 	}
 	orderID := req.Items[0].OrderId
-
-	itemStmt, err := tx.Prepare(` //Prepare нужен чтобы скомпелировать запрос один раз и после использовать его с данными
+	//Prepare нужен чтобы скомпелировать запрос один раз и после использовать его с данными
+	itemStmt, err := tx.Prepare(` 
 		INSERT INTO order_items (order_id, product_id, size_id, quantity, price_per_unit)
 		VALUES ($1, $2, $3, $4, $5)
 	`)
@@ -140,11 +138,11 @@ type CartResponse struct {
 	ItemCount int                `json:"item_count"`
 }
 
+// Функция для обработки GET запроса по получению содержимого корзины
 func GetCart(c *gin.Context) {
 	userId := 1
 	var cartId int
-	err := db.DB.QueryRow(` 
-	Select cart_id from user Where user_id=$1`, userId).Scan(&cartId) //Запрс для получения корзины по пользователю
+	err := db.DB.QueryRow(`Select id from carts Where user_id=$1`, userId).Scan(&cartId) //Запрс для получения корзины по пользователю
 	if err != nil {
 		log.Printf(" Ошибка SQL-запроса: %v", err)
 		c.JSON(500, gin.H{"error": "Ошибка при запросе к БД"})
@@ -165,21 +163,21 @@ func GetCart(c *gin.Context) {
 		JOIN products p ON ci.product_id = p.id
 		JOIN sizes s ON ci.size_id = s.id
 		WHERE ci.cart_id = $1`
-	rows, err := db.DB.Query(query, cartId)
+	rows, err := db.DB.Query(query, cartId) //Кладу результат запроса в rows (указатель на структуру sql.Rows)
 	if err != nil {
 		log.Printf("Ошибка запроса товаров корзины: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка загрузки корзины"})
 		return
 	}
 	defer rows.Close()
-	var items []CartItemResponse
+	var items []CartItemResponse //Выводимые элементы
 	var totalSum float64
 	var itemCount int
 
 	for rows.Next() {
 		var item CartItemResponse
 		var price float64
-		err := rows.Scan(
+		err := rows.Scan( //получение информации о продукте
 			&item.ID,
 			&item.ProductName,
 			&item.Brand,
@@ -192,7 +190,7 @@ func GetCart(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка данных"})
 			return
 		}
-		item.Price = price
+		item.Price = price //присваиваем цену элементу корзины
 		item.Total = price * float64(item.Quantity)
 		totalSum += item.Total
 		itemCount += item.Quantity
@@ -205,13 +203,14 @@ func GetCart(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, CartResponse{
+	c.JSON(http.StatusOK, CartResponse{ //Ответ сервера
 		Items:     items,
 		TotalSum:  totalSum,
 		ItemCount: itemCount,
 	})
 }
 
+// Функция для обработки POST-запроса на добавление товара в корзину
 func AddToCart(c *gin.Context) {
 	//продукт, его данные отправляем в запись для создания записи в корзине
 	userID := 1
@@ -226,11 +225,6 @@ func AddToCart(c *gin.Context) {
 		return
 	}
 	err := db.DB.QueryRow(`SELECT id FROM carts WHERE user_id = $1`, userID).Scan(&cartID) //Получаю id корзины
-	if err != nil {
-		log.Printf(" Ошибка SQL-запроса: %v", err)
-		c.JSON(500, gin.H{"error": "Ошибка при запросе к БД"})
-		return
-	}
 	if err == sql.ErrNoRows {
 		// Создаём корзину
 		err = db.DB.QueryRow(`
@@ -244,7 +238,8 @@ func AddToCart(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "Ошибка корзины"})
 		return
 	}
-	var stock int //Проверка на наличие
+	//Блок проверки на наличие
+	var stock int
 	err = db.DB.QueryRow(`
 	SELECT stock FROM product_sizes WHERE product_id = $1 AND size_id = $2
 `, input.ProductID, input.SizeID).Scan(&stock)
@@ -266,8 +261,66 @@ func AddToCart(c *gin.Context) {
 		return
 	}
 
-	c.JSON(200, gin.H{"message": "Товар добавлен в корзину"})
+	c.JSON(200, gin.H{"message": "Товар добавлен в корзину"}) //Ответ сервера
 }
 
+// Функция удаления товара из корзины
 func RemoveFromCart(c *gin.Context) {
+	userID := 1
+	var cartID int
+	var input struct { //структура для получения данных о товаре под удаление
+		ProductID int `json:"product_id" binding:"required"`
+		SizeID    int `json:"size_id" binding:"required"`
+		Quantity  int `json:"quantity"` //Опционально: если не указано, удаляем все
+	}
+	if err := c.ShouldBindJSON(&input); err != nil { //Заполнение структуры из JSON, проверка на ошибки
+		c.JSON(400, gin.H{"error": "Неверный формат данных"})
+		return
+	}
+	//Получаем id корзины пользователя
+	err := db.DB.QueryRow(`SELECT id FROM carts WHERE user_id = $1`, userID).Scan(&cartID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(404, gin.H{"error": "Корзина не найдена"})
+			return
+		}
+		log.Printf(" Ошибка SQL-запроса: %v", err)
+		c.JSON(500, gin.H{"error": "Ошибка при запросе к БД"})
+		return
+	}
+	//Проверяем, существует ли запись в корзине
+	var currentQuantity int
+	var cartItemID int
+	err = db.DB.QueryRow(`
+		SELECT id, quantity FROM cart_items 
+		WHERE cart_id = $1 AND product_id = $2 AND size_id = $3
+	`, cartID, input.ProductID, input.SizeID).Scan(&cartItemID, &currentQuantity)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(404, gin.H{"error": "Товар не найден в корзине"})
+			return
+		}
+		log.Printf(" Ошибка проверки товара в корзине: %v", err)
+		c.JSON(500, gin.H{"error": "Ошибка при запросе к БД"})
+		return
+	}
+	//Если количество не указано или указанное >= текущему, удаляем запись полностью
+	if input.Quantity == 0 || input.Quantity >= currentQuantity {
+		_, err = db.DB.Exec(`DELETE FROM cart_items WHERE id = $1`, cartItemID)
+		if err != nil {
+			log.Printf(" Ошибка удаления товара из корзины: %v", err)
+			c.JSON(500, gin.H{"error": "Не удалось удалить товар из корзины"})
+			return
+		}
+		c.JSON(200, gin.H{"message": "Товар удален из корзины"})
+		return
+	}
+	//Иначе уменьшаем количество
+	_, err = db.DB.Exec(`UPDATE cart_items SET quantity = quantity - $1 WHERE id = $2`, input.Quantity, cartItemID)
+	if err != nil {
+		log.Printf(" Ошибка обновления количества: %v", err)
+		c.JSON(500, gin.H{"error": "Не удалось обновить количество"})
+		return
+	}
+	c.JSON(200, gin.H{"message": "Количество товара уменьшено"}) //Ответ сервера
 }

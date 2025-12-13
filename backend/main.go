@@ -21,9 +21,9 @@ func main() {
 	// Регистрируем маршруты
 	r.GET("/api/products", handlers.GetProducts)
 	r.POST("/api/orders", handlers.CreateOrder)
-	r.Get("api/cart", handlers.GetCart)
-	r.Post("api/cart/add", handlers.AddToCart)
-	r.Delete("api/cart/remove", handlers.RemoveFromCart)
+	r.GET("api/cart", handlers.GetCart)
+	r.POST("api/cart/add", handlers.AddToCart)
+	r.DELETE("api/cart/remove", handlers.RemoveFromCart)
 	fmt.Println("Сервер запущен на http://localhost:8080")
 	r.Run(":8080")
 }
