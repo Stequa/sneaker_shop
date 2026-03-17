@@ -6,9 +6,81 @@ import (
 	"net/http"
 	"sneaker-shop/backend/db"
 	"sneaker-shop/backend/models"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
+
+// Структура для получения всей нужной информации о конкретном продукте в карточке
+type productResponce struct {
+	Sizes       []models.Size `json:"sizes"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Brand       string        `json:"brand"`
+	Price       float64       `json:"price"`
+	ImageUrl    string        `json:"image_url"`
+	Category    string        `json:"category"`
+}
+
+// Получение информации о продукте по id для карточки товара
+func GetProductPoId(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "Неверный формат ID"})
+		return
+	}
+	var name, description, brand, image_url, category string
+	var price float64
+	var sizes []models.Size
+	//Запрос данных о самом товаре
+	err = db.DB.QueryRow(`
+		SELECT p.name, p.description, p.brand, p.price, COALESCE(p.image_url, ''), c.name
+		FROM products p
+		Left JOIN categories c ON c.id=p.category_id
+		WHERE p.id=$1`, id).Scan(&name,
+		&description,
+		&brand,
+		&price,
+		&image_url,
+		&category)
+	if err != nil {
+		log.Printf(" Ошибка SQL-запроса: %v", err)
+		c.JSON(500, gin.H{"error": "Ошибка при запросе к БД"})
+		return
+	}
+	//Получение информации о размерах
+	rows, err := db.DB.Query(`SELECT s.id, s.size_label
+		FROM sizes s
+		JOIN product_sizes ps ON ps.size_id=s.id
+		Join products p ON p.id=ps.product_id
+		WHERE p.id=$1`, id)
+	if err != nil {
+		log.Printf(" Ошибка SQL-запроса размеров: %v", err)
+		c.JSON(500, gin.H{"error": "Ошибка при запросе к БД получение размеров"})
+		return
+	}
+	defer rows.Close()
+	for rows.Next() { //проход по строчкам и сбор размеров
+		var s models.Size
+		err := rows.Scan(&s.ID, &s.Sizes)
+		if err != nil {
+			log.Printf(" Ошибка Scan(): %v", err)
+			c.JSON(500, gin.H{"error": "Ошибка при чтении данных"})
+			return
+		}
+		sizes = append(sizes, s) //Добавление в массив
+	}
+	c.JSON(http.StatusOK, productResponce{ //Ответ продукт
+		Sizes:       sizes,
+		Name:        name,
+		Description: description,
+		Brand:       brand,
+		Price:       price,
+		ImageUrl:    image_url,
+		Category:    category,
+	})
+}
 
 // GetProducts возвращает список всех кроссовок (Gin-хэндлер) GET запрос
 func GetProducts(c *gin.Context) {
@@ -48,6 +120,8 @@ func CreateOrder(c *gin.Context) {
 		Status          string             `json:"status"`
 		ShippingAddress string             `json:"shipping_address"`
 		Phone           string             `json:"phone"`
+		Email           string             `json:"email`
+		Payment         string             `json:"payment"`
 		Items           []models.OrderItem `json:"items"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil { //Заполнение структуры из JSON, проверка на ошибки
@@ -123,9 +197,11 @@ func CreateOrder(c *gin.Context) {
 
 type CartItemResponse struct { //Элемент корзины
 	ID          int     `json:"id"`
+	ProductID   int     `json:"product_id"`
 	ProductName string  `json:"product_name"`
 	Brand       string  `json:"brand"`
 	SizeLabel   string  `json:"size"`
+	SizeID      int     `json:"size_id"`
 	Quantity    int     `json:"quantity"`
 	Price       float64 `json:"price"`
 	Total       float64 `json:"total"`
@@ -158,7 +234,7 @@ func GetCart(c *gin.Context) {
 		return
 	}
 	//Запрос на получение информации о продуктах в корзине юзера
-	query := `SELECT ci.id, p.name, p.brand, s.size_label, ci.quantity, p.price 
+	query := `SELECT ci.id, ci.product_id, p.name, p.brand, s.size_label, ci.size_id, ci.quantity, p.price 
 		FROM cart_items ci
 		JOIN products p ON ci.product_id = p.id
 		JOIN sizes s ON ci.size_id = s.id
@@ -179,9 +255,11 @@ func GetCart(c *gin.Context) {
 		var price float64
 		err := rows.Scan( //получение информации о продукте
 			&item.ID,
+			&item.ProductID,
 			&item.ProductName,
 			&item.Brand,
 			&item.SizeLabel,
+			&item.SizeID,
 			&item.Quantity,
 			&price,
 		)
@@ -218,7 +296,7 @@ func AddToCart(c *gin.Context) {
 	var input struct { //структура для вводa
 		ProductID int `json:"product_id" binding:"required"`
 		SizeID    int `json:"size_id" binding:"required"`
-		Quantity  int `json:"quantity" binding:"required,min=1"`
+		Quantity  int `json:"quantity" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil { //Заполнение структуры из JSON, проверка на ошибки
 		c.JSON(400, gin.H{"error": "Неверный формат данных"})
@@ -243,21 +321,47 @@ func AddToCart(c *gin.Context) {
 	err = db.DB.QueryRow(`
 	SELECT stock FROM product_sizes WHERE product_id = $1 AND size_id = $2
 `, input.ProductID, input.SizeID).Scan(&stock)
-	if err != nil || stock < input.Quantity {
-		c.JSON(400, gin.H{"error": "Товара нет в наличии"})
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Ошибка запроса склада"})
 		return
 	}
-	var in_cart int //Если запись уже существует
+
+	// узнаём текущее количество в корзине
+	var currentQuantity int
+	err = db.DB.QueryRow(`
+	SELECT COALESCE(quantity, 0)
+	FROM cart_items
+	WHERE cart_id = $1 AND product_id = $2 AND size_id = $3
+`, cartID, input.ProductID, input.SizeID).Scan(&currentQuantity)
+	if err == sql.ErrNoRows {
+		currentQuantity = 0
+	} else if err != nil {
+		c.JSON(500, gin.H{"error": "Ошибка запроса корзины"})
+		return
+	}
+
+	// проверяем лимит
+	if currentQuantity+input.Quantity > stock {
+		c.JSON(400, gin.H{"error": "Товара нет в наличии в таком количестве"})
+		return
+	}
+
+	var in_cart int
 	err = db.DB.QueryRow(`Select id from cart_items where cart_id=$1 and product_id=$2 and size_id=$3`,
 		cartID, input.ProductID, input.SizeID).Scan(&in_cart)
 	if err == nil {
 		// Запись найдена — обновляем
-		_, err = db.DB.Exec(`UPDATE cart_items set quantity=quantity + $1 where id=$2`, input.Quantity, in_cart)
+		_, err = db.DB.Exec(`UPDATE cart_items set quantity=quantity+$1 where id=$2`, input.Quantity, in_cart)
 	} else if err == sql.ErrNoRows {
 		_, err = db.DB.Exec(`INSERT INTO cart_items (cart_id, product_id, size_id, quantity)
 	VALUES ($1, $2, $3, $4)`, cartID, input.ProductID, input.SizeID, input.Quantity)
 	} else {
 		c.JSON(500, gin.H{"error": "Ошибка обновление корзины"})
+		return
+	}
+	if err != nil {
+		log.Printf("Ошибка выполнения запроса: %v", err)
+		c.JSON(500, gin.H{"error": "Не удалось обновить корзину"})
 		return
 	}
 
@@ -323,4 +427,22 @@ func RemoveFromCart(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"message": "Количество товара уменьшено"}) //Ответ сервера
+}
+
+// Функция для получения обратной связи
+func PostContact(c *gin.Context) {
+	var input models.Contact
+	if err := c.ShouldBindJSON(&input); err != nil { //Заполнение структуры из JSON, проверка на ошибки
+		c.JSON(400, gin.H{"error": "Неверный формат данных"})
+		return
+	}
+	_, err := db.DB.Exec(`
+	INSERT INTO contact (name_contact, email, comment) 
+	VALUES ($1, $2, $3)`, input.NameContact, input.Email, input.Comment)
+	if err != nil {
+		log.Printf("Ошибка добавления записи")
+		c.JSON(500, gin.H{"message": "Ошибка добавления"})
+		return
+	}
+	c.JSON(200, gin.H{"message": "Заявка отправлена"})
 }

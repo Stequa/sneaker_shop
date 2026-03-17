@@ -3,9 +3,31 @@ import axios from 'axios';
 import ProductCard from './components/ProductCard';
 import Logo from '../assets/Logo.png';
 
-export default function ContactPage (){
+export default function ContactPage (){//Форма для отправки заявок покупателей
     const [loading,  setLoading] = useState(true);
+    const [formData, setFormData] = useState({ //Получение информации из полей
+      name_contact: '',
+      email: '',
+      comment: ''
+    });
+    const [submitStatus, setSubmitStatus] = useState(null); // null | 'success' | 'error'
 
+    const handleChange=(e)=>{ //Хендлер который изменяет fornData по ключу
+        const {name, value}=e.target
+        setFormData(prev =>({...prev, [name]:value}));
+    };
+    const handleSubmit = async (e) => { //Ъендл который срабатывает при отправке запроса
+      e.preventDefault(); // отменяет перезагрузку страницы
+    
+      try {
+        await axios.post('http://localhost:8080/api/contact', formData); //отправка на сервер
+        setSubmitStatus('success');
+        setFormData({ name_contact: '', email: '', comment: '' }); // очистка
+      } catch (error) {
+        console.error('Ошибка отправки:', error);
+        setSubmitStatus('error');
+      }
+    };
 
 
 
@@ -19,7 +41,7 @@ export default function ContactPage (){
           alt="Логотип магазина" 
           style={{ 
             height: '5%',        
-            maxHeight: '80px',    // ← но не больше 80px
+            maxHeight: '80px',    
             objectFit: 'contain'
           }} 
         />
@@ -29,7 +51,8 @@ export default function ContactPage (){
       <div className="navbar">
         <a href="/">Каталог</a>
         <a href="/cart">Корзина</a>
-        <a href="/about">Связаться с нами</a>
+        <a href="/contact">Связаться с нами</a>
+        <a href="/about">О Нас</a>
         <input
           type="text"
           name="search"
@@ -38,62 +61,110 @@ export default function ContactPage (){
           autoComplete="off"
         />
       </div>
-    
-      <div style={{ border: '2px solid #212529', margin: '20px', padding: '20px' }}>
-  <div className="forma">
-    <h2>Форма для обратной связи</h2>
-  </div>
-  <div className="forma">
-    <label>Ваше имя:</label>
-    <input type="text" name="name" style={{ margin: '10px', width: '30%' }} />
-  </div>
-  <div className="forma">
-    <label>Эл. почта:</label>
-    <input type="email" name="email" style={{ margin: '10px', width: '30%', 
-        border: '1px solid #495057'
-    }} />
-  </div>
-  <label style={{ margin: '20px' }}>Запрос:</label>
-  <div className="forma">
-    <textarea
-      name="message"
+      <div style={{ border: '2px solid #212529', margin: '20px', padding: '20px',
+        backgroundColor: '#f8f9fa',
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+        borderRadius: '12px'
+       }}>
+        <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>Форма для обратной связи</h2>
+ {/* Отображение при удачной отправке */}
+        {submitStatus === 'success' && (
+          <p style={{ color: 'green', textAlign: 'center', marginBottom: '15px' }}>
+             Ваш запрос отправлен!
+          </p>
+        )}
+        {submitStatus === 'error' && (
+          <p style={{ color: 'red', textAlign: 'center', marginBottom: '15px' }}>
+             Не удалось отправить запрос. Попробуйте позже.
+          </p>
+        )}
+
+ {/* Сама форма для заполнении информации */}
+        <form onSubmit={handleSubmit}>
+          <div className="forma" style={{ marginBottom: '15px' }}>
+            <label>Ваше имя:</label>
+            <input
+              type="text"
+              name="name_contact"
+              value={formData.name_contact}
+              onChange={handleChange}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #ced4da',
+                borderRadius: '6px',
+                fontSize: '1rem',
+                backgroundColor: 'white'
+              }}
+              required
+              
+              pattern="[a-zA-Zа-яА-Я\s\-]+"  
+            />
+          </div>
+{/* pattern запрещает вводить цифры в поле имени */}
+
+{/* value определяет к какому значению в setformdata привязывается поле, OnChange 
+вызывает хэндлер при изменении информации в поле*/}
+          <div className="forma" style={{ marginBottom: '15px' }}>
+            <label>Эл. почта:</label>
+            <input
+              type="email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
       style={{
-        margin: '10px',
-        width: '90%',
-        height: '120px',
-        padding: '10px',
-        fontSize: '16px',
-        fontFamily: 'inherit',
-        border: '1px solid #ccc',
-        borderRadius: '4px'
+        width: '100%',
+        padding: '0.75rem',
+        border: '1px solid #ced4da',
+        borderRadius: '6px',
+        fontSize: '1rem',
+        backgroundColor: 'white'
       }}
-    />
-  </div>
-  
-  {/* Контейнер для кнопки с той же шириной, что и textarea */}
-  <div style={{ 
-    display: 'flex',
-    width: '90%',  // Та же ширина, что и у textarea (90%)
-    margin: '10px' // Та же маржа, что и у textarea
-  }}>
-    <button 
-      style={{
-        padding: '8px 16px',
-        backgroundColor: '#000',
-        color: 'white',
-        border: '1px solid #000',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        fontWeight: 'bold',
-        marginLeft: 'auto',
-        width: '20%'  // Можно оставить или убрать, если хотите авто-ширину
-      }}
-      onClick={() => alert('Ваш запрос отправлен')}
-    >
-      Отправить
-    </button>
-  </div>
-</div>
+              required
+            />
+          </div>
+          <div className="forma">Запрос:</div>
+          <div className="forma" style={{ marginBottom: '15px' }}>
+            <textarea
+              name="comment"
+              value={formData.comment}
+              onChange={handleChange}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #ced4da',
+                borderRadius: '6px',
+                fontSize: '1rem',
+                backgroundColor: 'white',
+                margin: '10px',
+                height: '120px',
+                fontFamily: 'inherit',
+                border: '1px solid #ccc',
+
+              }}
+              required
+            />
+          </div>
+
+          <div style={{ display: 'flex', width: '90%', margin: '10px' }}>
+            <button
+              type="submit"
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#000',
+                color: 'white',
+                border: '1px solid #000',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                marginLeft: 'auto'
+              }}
+            >
+              Отправить
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
-    );
+  );
 }

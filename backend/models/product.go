@@ -48,3 +48,10 @@ type Cart struct {
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
+
+type Contact struct {
+	ID          int    `json:"id"`
+	NameContact string `json:"name_contact"`
+	Email       string `json:"email"`
+	Comment     string `json:"comment"`
+}

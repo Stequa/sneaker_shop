@@ -19,11 +19,14 @@ func main() {
 	r.Use(cors.Default())
 
 	// Регистрируем маршруты
+	// Важно: специфичные маршруты с параметрами должны быть ПЕРЕД общими
+	r.GET("/api/products/:id", handlers.GetProductPoId)
 	r.GET("/api/products", handlers.GetProducts)
 	r.POST("/api/orders", handlers.CreateOrder)
 	r.GET("api/cart", handlers.GetCart)
 	r.POST("api/cart/add", handlers.AddToCart)
 	r.DELETE("api/cart/remove", handlers.RemoveFromCart)
+	r.POST("api/contact", handlers.PostContact)
 	fmt.Println("Сервер запущен на http://localhost:8080")
 	r.Run(":8080")
 }
